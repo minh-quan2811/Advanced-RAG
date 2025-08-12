@@ -1,0 +1,39 @@
+●テキストデータ
+
+・ＪＣＡＩ２０２デシル顧客.doc
+    ２章 顧客マーケティング　「デシル顧客」
+
+・ＪＣＡＩ204CRM.doc
+    ２章 顧客マーケティング　「CRM」
+
+・ＪＣＡＩ３０２ＭＫ構造.doc
+    ３章 マーケティング　「マーケティング」
+
+・ＪＣＡＩ３０１ＭＫ.doc
+    ３章 マーケティング  「ＭＫ構造」
+
+
+●エクセルデータ　　＊いずれも52週トレンド
+
+・てんぷら52週.xls
+
+・通年野菜52週.xls
+
+●PDFデータ　　＊いずれもDMA大会のレジュメ
+
+・AM08-0637 Case Study ColoniaLife.pdf
+    DMA08　Conference ＆ Exhibition レジュメ
+
+・50 DM tips.pdf
+    DMA85th　50 Direct Mail tipsレジュメ
+
+・AM08-EmailMarketing.pdf
+    DMA08　E-mail Marketingレジュメ
+
+●画像データ　　＊いずれもライフスタイル
+
+・1_Active Travelers.jpg
+
+・3_Pet Owners.jpg
+
+・4_Young, Prominent ＆ Spending.jpg
