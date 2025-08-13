@@ -11,3 +11,5 @@ python-dotenv==1.0.0
 docx2txt
 jaconv
 matplotlib
+qdrant_client
+llama-index-vector-stores-qdrant
