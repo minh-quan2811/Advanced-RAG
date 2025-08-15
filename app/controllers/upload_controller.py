@@ -1,15 +1,26 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException
-from ..services.file_processing_service import process_uploaded_file
+from fastapi import APIRouter, File, UploadFile, HTTPException, BackgroundTasks
+from ..services.file_processing_service import process_uploaded_file, UPLOAD_DIR
 import os
+import shutil
 
 router = APIRouter()
 
 @router.post("/upload")
-def upload_file(file: UploadFile = File(...)):
-    allowed_ext = {".docx", ".doc", ".pdf", ".txt"}
-    ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in allowed_ext:
-        raise HTTPException(status_code=400, detail="File type not allowed.")
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    print(f"Received file: {file.filename}")
     
-    result = process_uploaded_file(file)
-    return result
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    
+    # Save the file immediately to a persistent location
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not save file: {e}")
+    finally:
+        file.file.close()
+
+    # Pass the file path to the background task, not the UploadFile object
+    background_tasks.add_task(process_uploaded_file, file_path=file_path, filename=file.filename)
+    
+    return {"filename": file.filename, "status": "processing in background"}

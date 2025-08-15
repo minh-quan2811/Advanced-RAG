@@ -55,13 +55,6 @@ class NodeStorageHandler:
             collection_name: Tên collection trong Qdrant
         """
         self.collection_name = collection_name
-        
-        # Thiết lập Google API key
-        if google_api_key:
-            os.getenv["GOOGLE_API_KEY"] = google_api_key
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            logger.warning("Chưa có GOOGLE_API_KEY. Vui lòng thiết lập API key để sử dụng Google Gemini models.")
 
         # Khởi tạo LLM và Embedding model với Google Gemini
         self.llm = GoogleGenAI(
@@ -70,9 +63,7 @@ class NodeStorageHandler:
         )
         self.embed_model = BedrockEmbedding(
             model_name="amazon.titan-embed-text-v2:0",
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            region_name=os.getenv("AWS_REGION"),
+            region_name='us-west-2',
         )
 
         # Cấu hình Settings global
@@ -171,10 +162,6 @@ class NodeStorageHandler:
                 logger.info("Không thể tải index (có thể là lần chạy đầu tiên). Sẽ tạo index mới.")
                 self.index = None
 
-        # Thêm node mới và cập nhật Index
-        logger.info("Thêm tài liệu mới vào docstore...")
-        self.storage_context.docstore.add_documents(nodes)
-        
         leaf_nodes = get_leaf_nodes(nodes)
         logger.info(f"Chuẩn bị chèn {len(leaf_nodes)} leaf nodes vào vector store.")
         
