@@ -16,3 +16,6 @@ llama-index-vector-stores-qdrant
 langchain-experimental
 uvicorn
 fastapi
+python-multipart
+langchain_aws
+llama-parse

@@ -5,3 +5,4 @@
 # Ignore Python virtual environment folders
 env/
 venv/
+/temp
