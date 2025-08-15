@@ -138,8 +138,6 @@ class MetadataExtractor:
         if not premetadata.is_relevant:
             print("Premetadata is not relevant")
             return None
-        
-        print(f"Premetadata: {premetadata.relevance_reason}")
 
         # Use defaults if db_categories or db_keywords are empty or None
         default_categories = [

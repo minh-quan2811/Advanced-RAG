@@ -86,7 +86,7 @@ class NodeStorageHandler:
         """
         Thiết lập Qdrant client
         """
-        logger.info("Thiết lập Qdrant client...")
+        logger.debug("Thiết lập Qdrant client...")
         
         if qdrant_url and qdrant_api_key:
             # Qdrant Cloud
@@ -95,11 +95,11 @@ class NodeStorageHandler:
                 api_key=qdrant_api_key,
                 timeout=60
             )
-            logger.info("Đã kết nối với Qdrant Cloud")
+            logger.debug("Đã kết nối với Qdrant Cloud")
         else:
             # Local Qdrant
             client = qdrant_client.QdrantClient(path="./qdrant_storage")
-            logger.info("Đã khởi tạo Qdrant local")
+            logger.debug("Đã khởi tạo Qdrant local")
             
         return client
 
@@ -107,12 +107,12 @@ class NodeStorageHandler:
         """
         Kiểm tra kết nối đến các services
         """
-        logger.info("Kiểm tra kết nối...")
+        logger.debug("Kiểm tra kết nối...")
     
         # Check Qdrant
         try:
             collections = self.qdrant_client.get_collections()
-            logger.info(f"✅ Qdrant connection OK - {len(collections.collections)} collections")
+            logger.debug(f"✅ Qdrant connection OK - {len(collections.collections)} collections")
         except Exception as e:
             logger.error(f"❌ Qdrant connection failed: {e}")
 
@@ -125,14 +125,14 @@ class NodeStorageHandler:
             logger.warning("Không có node nào được cung cấp để thêm vào. Bỏ qua.")
             # Nếu index chưa được load, cố gắng load nó từ storage hiện có
             if not self.index and os.path.exists(persist_dir):
-                logger.info(f"Đang thử tải index hiện có từ {persist_dir}...")
+                logger.debug(f"Đang thử tải index hiện có từ {persist_dir}...")
                 vector_store = QdrantVectorStore(client=self.qdrant_client, collection_name=self.collection_name)
                 self.storage_context = StorageContext.from_defaults(persist_dir=persist_dir, vector_store=vector_store)
                 self.index = load_index_from_storage(self.storage_context)
-                logger.info("Đã tải index thành công.")
+                logger.debug("Đã tải index thành công.")
             return self.index
 
-        logger.info(f"Chuẩn bị thêm {len(nodes)} nodes mới vào các kho lưu trữ...")
+        logger.debug(f"Chuẩn bị thêm {len(nodes)} nodes mới vào các kho lưu trữ...")
 
         # Thiết lập Vector Store
         vector_store = QdrantVectorStore(
@@ -143,31 +143,31 @@ class NodeStorageHandler:
         # Tạo mới Storage Context (để quản lý docstore và index_store)
         if not self.storage_context:
             if os.path.exists(persist_dir):
-                logger.info(f"Tìm thấy storage tại {persist_dir}, đang tải...")
+                logger.debug(f"Tìm thấy storage tại {persist_dir}, đang tải...")
                 self.storage_context = StorageContext.from_defaults(
                     persist_dir=persist_dir,
                     vector_store=vector_store
                 )
             else:
-                logger.info("Không tìm thấy storage, đang tạo mới...")
+                logger.debug("Không tìm thấy storage, đang tạo mới...")
                 self.storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
         # Tạo mới Index
         if not self.index:
             try:
-                logger.info("Đang thử tải index từ storage context...")
+                logger.debug("Đang thử tải index từ storage context...")
                 self.index = load_index_from_storage(self.storage_context)
-                logger.info("Đã tải index hiện có thành công.")
+                logger.debug("Đã tải index hiện có thành công.")
             except Exception:
-                logger.info("Không thể tải index (có thể là lần chạy đầu tiên). Sẽ tạo index mới.")
+                logger.debug("Không thể tải index (có thể là lần chạy đầu tiên). Sẽ tạo index mới.")
                 self.index = None
 
         leaf_nodes = get_leaf_nodes(nodes)
-        logger.info(f"Chuẩn bị chèn {len(leaf_nodes)} leaf nodes vào vector store.")
+        logger.debug(f"Chuẩn bị chèn {len(leaf_nodes)} leaf nodes vào vector store.")
         
         if self.index is None:
             # Nếu chưa có index nào -> tạo mới hoàn toàn với các node đầu tiên
-            logger.info("Tạo VectorStoreIndex mới...")
+            logger.debug("Tạo VectorStoreIndex mới...")
             self.index = VectorStoreIndex(
                 nodes=leaf_nodes,
                 storage_context=self.storage_context,
@@ -176,7 +176,7 @@ class NodeStorageHandler:
             )
         else:
             # Nếu đã có index -> chỉ chèn các node mới vào
-            logger.info("Chèn các node mới vào VectorStoreIndex hiện có...")
+            logger.debug("Chèn các node mới vào VectorStoreIndex hiện có...")
             self.index.insert_nodes(
                 leaf_nodes,
                 show_progress=True
@@ -184,16 +184,16 @@ class NodeStorageHandler:
 
         # 5. Lưu lại trạng thái mới của storage context (quan trọng!)
         self.storage_context.persist(persist_dir=persist_dir)
-        logger.info(f"Đã lưu lại storage context tại {persist_dir}")
+        logger.debug(f"Đã lưu lại storage context tại {persist_dir}")
         
-        logger.info("Đã xây dựng/cập nhật xong AutoMerging Index.")
+        logger.debug("Đã xây dựng/cập nhật xong AutoMerging Index.")
         return self.index
 
     def _create_custom_auto_retriever(self, similarity_top_k: int = 30):
         """
         Tạo ra auto retrieve 
         """
-        logger.info("Định nghĩa VectorStoreInfo cho auto-retriever")
+        logger.debug("Định nghĩa VectorStoreInfo cho auto-retriever")
         # Our metadata
         vector_store_info = VectorStoreInfo(
             content_info="A collection of marketing documents, analyses, and case studies focused on marketing strategy and customer value management.",
@@ -223,7 +223,7 @@ class NodeStorageHandler:
             ]
         )
 
-        logger.info("Mẫu prompt tùy chỉnh với các ví dụ")
+        logger.debug("Mẫu prompt tùy chỉnh với các ví dụ")
         # Redefine the default prompt
         prompt_tmpl_str = """
         Your goal is to structure the user's query to match the request schema provided below.
@@ -273,7 +273,7 @@ class NodeStorageHandler:
         
         custom_prompt = PromptTemplate(prompt_tmpl_str)
 
-        logger.info("Khởi tạo VectorIndexAutoRetriever với custom prompt")
+        logger.debug("Khởi tạo VectorIndexAutoRetriever với custom prompt")
         
         base_retriever = VectorIndexAutoRetriever(
             self.index,
@@ -288,7 +288,7 @@ class NodeStorageHandler:
         """
         Tạo Query Engine với AutoMerging Retriever
         """
-        logger.info("Tạo query engine từ stored nodes...")
+        logger.debug("Tạo query engine từ stored nodes...")
         
         # Load từ storage nếu chưa có index
         if not self.index:
@@ -312,16 +312,16 @@ class NodeStorageHandler:
             callback_manager=CallbackManager([LlamaDebugHandler(print_trace_on_end=True)])
         )
         
-        logger.info("Query engine đã sẵn sàng!")
+        logger.debug("Query engine đã sẵn sàng!")
         return query_engine
 
     def setup_complete_pipeline(self, persist_dir: str = "./storage_testing", similarity_top_k: int = 30):
         """
         Thiết lập pipeline hoàn chỉnh từ nodes đến query engine
         """
-        logger.info("Thiết lập complete pipeline...")
+        logger.debug("Thiết lập complete pipeline...")
         
-        logger.info("Lấy nodes từ MarketingDocs...")
+        logger.debug("Lấy nodes từ MarketingDocs...")
 
         # md = MarketingDocs()
         # all_nodes = md.get_nodes()

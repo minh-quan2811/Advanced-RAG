@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import asyncio
 import json
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 import threading
@@ -52,12 +52,12 @@ class DocumentChunker:
             chunk_overlap=self.chunk_overlap
         )
         
-        logger.info(f"DocumentChunker initialized with chunk sizes: {self.chunk_sizes}")
+        logger.debug(f"DocumentChunker initialized with chunk sizes: {self.chunk_sizes}")
 
     def load_documents_from_folder(self, data_folder: str) -> List[Document]:
         data_folder_path = Path(data_folder)
         
-        logger.info(f"Loading documents from {data_folder_path}")
+        logger.debug(f"Loading documents from {data_folder_path}")
 
         if not data_folder_path.exists():
             raise FileNotFoundError(f"Folder {data_folder_path} does not exist!")
@@ -69,12 +69,12 @@ class DocumentChunker:
         )
 
         documents = reader.load_data()
-        logger.info(f"Loaded {len(documents)} documents")
+        logger.debug(f"Loaded {len(documents)} documents")
 
         return documents
 
     def load_documents_from_text(self, text_content: str, metadata: dict = None) -> List[Document]:
-        logger.info("Loading document from text content")
+        logger.debug("Loading document from text content")
         
         if not text_content.strip():
             raise ValueError("Text content is empty!")
@@ -90,8 +90,8 @@ class DocumentChunker:
         """Background task to parse files using LlamaParse"""
         try:
             self.processing_status[task_id] = "parsing"
-            logger.info(f"Starting background parsing for {file_path} (task_id: {task_id})")
-            
+            logger.debug(f"Starting background parsing for {file_path} (task_id: {task_id})")
+
             # Directly await the async aparse method
             parse_result = await llama_parser.llama_parse.aparse(str(file_path))
             
@@ -107,7 +107,7 @@ class DocumentChunker:
             # Store the processed documents
             self.processed_documents[task_id] = documents
             self.processing_status[task_id] = "completed"
-            logger.info(f"Background parsing completed for {file_path} (task_id: {task_id})")
+            logger.debug(f"Background parsing completed for {file_path} (task_id: {task_id})")
             
         except Exception as e:
             logger.error(f"Error in background parsing for {file_path}: {e}")
@@ -117,7 +117,7 @@ class DocumentChunker:
     async def load_documents_from_file(self, file_path: str) -> Union[List[Document], Dict[str, str]]:
         file_path_obj = Path(file_path)
         
-        logger.info(f"Loading document from {file_path_obj}")
+        logger.debug(f"Loading document from {file_path_obj}")
 
         if not file_path_obj.exists():
             raise FileNotFoundError(f"File {file_path_obj} does not exist!")
@@ -150,7 +150,7 @@ class DocumentChunker:
                 logger.error(f'Parse result: {parse_result}')
                 raise ValueError("Unable to convert parse_result to Document(s)")
 
-            logger.info(f"Parsed {len(documents)} documents from {file_path_obj}")
+            logger.debug(f"Parsed {len(documents)} documents from {file_path_obj}")
             return documents
             
         # For standard file types, use SimpleDirectoryReader
@@ -158,7 +158,7 @@ class DocumentChunker:
             reader = SimpleDirectoryReader(input_files=[str(file_path_obj)])
             documents = reader.load_data()
         
-        logger.info(f"Loaded {len(documents)} documents from file")
+        logger.debug(f"Loaded {len(documents)} documents from file")
         return documents
 
     def get_processing_status(self, task_id: str) -> Dict[str, Any]:
@@ -184,7 +184,7 @@ class DocumentChunker:
         return None
 
     def create_hierarchical_chunks(self, documents: List[Document], metadata: dict) -> List:
-        logger.info("Creating hierarchical chunks...")
+        logger.debug("Creating hierarchical chunks...")
 
         if not documents:
             raise ValueError("No documents provided for chunking!")
@@ -194,7 +194,7 @@ class DocumentChunker:
         leaf_nodes = get_leaf_nodes(nodes)
         root_nodes = get_root_nodes(nodes)
         
-        logger.info(f"Created {len(nodes)} hierarchical nodes")
+        logger.debug(f"Created {len(nodes)} hierarchical nodes")
         logger.info(f"Leaf nodes: {len(leaf_nodes)}, Root nodes: {len(root_nodes)}")
         
         return self.apply_metadata(nodes, metadata)

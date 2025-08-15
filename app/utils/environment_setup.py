@@ -6,7 +6,6 @@ class EnvironmentSetup:
         # print pwd     
         if env_path is None:
             env_path = os.path.join(os.path.dirname(__file__), '../../.env')
-            print(env_path)
         load_dotenv(env_path)
         self.REDIS_URL = os.getenv('REDIS_URL')
         self.CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL')
@@ -24,9 +23,6 @@ class EnvironmentSetup:
         os.environ["LANGCHAIN_ENDPOINT"] = self.LANGSMITH_ENDPOINT or ""
         os.environ["LANGCHAIN_API_KEY"] = self.LANGSMITH_API_KEY or ""
         os.environ["LANGCHAIN_PROJECT"] = self.LANGSMITH_PROJECT or ""
-
-        print("Environment variables loaded successfully.")
-        print(self.as_dict())
     def as_dict(self):
         return {
             'REDIS_URL': self.REDIS_URL,

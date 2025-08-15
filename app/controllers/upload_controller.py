@@ -7,8 +7,6 @@ router = APIRouter()
 
 @router.post("/upload")
 async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
-    print(f"Received file: {file.filename}")
-    
     file_path = os.path.join(UPLOAD_DIR, file.filename)
     
     # Save the file immediately to a persistent location
