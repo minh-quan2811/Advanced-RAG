@@ -1,0 +1,153 @@
+   "docstore/ref_doc_info":{
+      "bf5039be-48e3-4303-899e-067b4fa4b904":{
+         "node_ids":[
+            "339e3a16-66d9-4927-938e-458a9633d80d",
+            "6b44ea2e-55c4-45f5-806f-1cd8321f3c73",
+            "30ea1a22-77fc-4d58-a1b5-61610b8b6452"
+         ],
+         "metadata":{
+            "file_name":"example.docx",
+            "file_path":"C:\\Users\\Admin\\Desktop\\Sailing Project\\client data\\example.docx",
+            "file_type":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "file_size":17381,
+            "creation_date":"2025-08-10",
+            "last_modified_date":"2025-08-11"
+         }
+      },
+      "c0b3291f-f5e1-4080-a9d0-ca87ab9aaf6a":{
+         "node_ids":[
+            "cfb4d438-a9ae-4042-a8df-1738a27de45f",
+            "675dec39-c975-40f6-a7cc-61896b646b3c",
+            "69f62561-8b2c-4c1a-a04f-1e06e8b77e94",
+            ...
+         "metadata":{
+            "file_name":"JCAI\uff13\uff10\uff11\uff2d\uff2b.docx",
+            "file_path":"C:\\Users\\Admin\\Desktop\\Sailing Project\\client data\\JCAI\uff13\uff10\uff11\uff2d\uff2b.docx",
+            "file_type":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "file_size":49901,
+            "creation_date":"2025-08-09",
+            "last_modified_date":"2025-08-06"
+         }
+      },
+      
+   "docstore/data":{
+      "339e3a16-66d9-4927-938e-458a9633d80d":{
+         "__data__":{
+            "id_":"339e3a16-66d9-4927-938e-458a9633d80d",
+            "embedding":null,
+            "metadata":{
+               "file_name":"example.docx",
+               "file_path":"C:\\Users\\Admin\\Desktop\\Sailing Project\\client data\\example.docx",
+               "file_type":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+               "file_size":17381,
+               "creation_date":"2025-08-10",
+               "last_modified_date":"2025-08-11"
+            },
+            "excluded_embed_metadata_keys":[
+               "file_name",
+               "file_type",
+               "file_size",
+               "creation_date",
+               "last_modified_date",
+               "last_accessed_date"
+            ],
+            "excluded_llm_metadata_keys":[
+               "file_name",
+               "file_type",
+               "file_size",
+               "creation_date",
+               "last_modified_date",
+               "last_accessed_date"
+            ],
+            "relationships":{
+               "1":{
+                  "node_id":"bf5039be-48e3-4303-899e-067b4fa4b904",
+                  "node_type":"4",
+                  "metadata":{
+                     "file_name":"example.docx",
+                     "file_path":"C:\\Users\\Admin\\Desktop\\Sailing Project\\client data\\example.docx",
+                     "file_type":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                     "file_size":17381,
+                     "creation_date":"2025-08-10",
+                     "last_modified_date":"2025-08-11"
+                  },
+                  "hash":"325e76a0c6bc45a2233cd59cb333ae91c2f7bcbfe39a294735b43fe812d4ca89",
+                  "class_name":"RelatedNodeInfo"
+               },
+               "5":[
+                  {
+                     "node_id":"6b44ea2e-55c4-45f5-806f-1cd8321f3c73",
+                     "node_type":"1",
+                     "metadata":{
+                        "file_name":"example.docx",
+                        "file_path":"C:\\Users\\Admin\\Desktop\\Sailing Project\\client data\\example.docx",
+                        "file_type":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "file_size":17381,
+                        "creation_date":"2025-08-10",
+                        "last_modified_date":"2025-08-11"
+                     },
+                     "hash":"dabbac9bb789af3e1a21c174b230ecb90d6ccd87eaf37bad191e42414d48dbf4",
+                     "class_name":"RelatedNodeInfo"
+                  }
+               ]
+            },
+            "metadata_template":"{key}: {value}",
+            "metadata_separator":"\n",
+            "text":"Artificial Intelligence (AI) is transforming industries worldwide.  \n\nIt refers to the simulation of human intelligence in machines that can reason, learn, and make decisions.  \n\nSome key subfields of AI include:  \n\n- Machine learning \u2014 systems that improve from data without being explicitly programmed  \n\n- Natural language processing \u2014 enabling computers to understand and generate human language  \n\n- Computer vision \u2014 allowing machines to interpret visual data  \n\n- Robotics \u2014 combining AI with mechanical design to create autonomous machines  \n\n\n\nFact: In 2023, the global AI market size was estimated at over $200 billion and is projected to grow rapidly.  \n\n\n\nMachine learning is a subset of AI that learns patterns from large datasets.",
+            "mimetype":"text/plain",
+            "start_char_idx":0,
+            "end_char_idx":2812,
+            "metadata_seperator":"\n",
+            "text_template":"{metadata_str}\n\n{content}",
+            "class_name":"TextNode"
+         },
+         "__type__":"1"
+      },
+
+   "docstore/metadata":{
+      "339e3a16-66d9-4927-938e-458a9633d80d":{
+         "doc_hash":"dabbac9bb789af3e1a21c174b230ecb90d6ccd87eaf37bad191e42414d48dbf4",
+         "ref_doc_id":"bf5039be-48e3-4303-899e-067b4fa4b904"
+      },
+      "6b44ea2e-55c4-45f5-806f-1cd8321f3c73":{
+         "doc_hash":"dabbac9bb789af3e1a21c174b230ecb90d6ccd87eaf37bad191e42414d48dbf4",
+         "ref_doc_id":"bf5039be-48e3-4303-899e-067b4fa4b904"
+      },
+      
+      
+Index
+{
+   "index_store/data":{
+      "cfb3c1c7-d831-4922-b971-8fcab64a4e35":{
+         "__type__":"vector_store",
+         "__data__":"{\"index_id\": \"cfb3c1c7-d831-4922-b971-8fcab64a4e35\", \"summary\": null, \"nodes_dict\": {\"30ea1a22-77fc-4d58-a1b5-61610b8b6452\": \"30ea1a22-77fc-4d58-a1b5-61610b8b6452\", \"1a529909-1069-4323-ace1-c2bf01ea3826\": \"1a529909-1069-4323-ace1-c2bf01ea3826\"}, \"doc_id_dict\": {}, \"embeddings_dict\": {}}"
+      }
+   }
+}
+
+
+Vector
+   "embedding_dict":{
+      "30ea1a22-77fc-4d58-a1b5-61610b8b6452":[
+         -0.010263371281325817,
+         0.09916216135025024,
+         ...
+      "1a529909-1069-4323-ace1-c2bf01ea3826":[
+      
+   "text_id_to_ref_doc_id":{
+      "30ea1a22-77fc-4d58-a1b5-61610b8b6452":"bf5039be-48e3-4303-899e-067b4fa4b904",
+      "1a529909-1069-4323-ace1-c2bf01ea3826":"c0b3291f-f5e1-4080-a9d0-ca87ab9aaf6a",
+      
+   "metadata_dict":{
+      "30ea1a22-77fc-4d58-a1b5-61610b8b6452":{
+         "file_name":"example.docx",
+         "file_path":"C:\\Users\\Admin\\Desktop\\Sailing Project\\client data\\example.docx",
+         "file_type":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+         "file_size":17381,
+         "creation_date":"2025-08-10",
+         "last_modified_date":"2025-08-11",
+         "_node_type":"TextNode",
+         "document_id":"bf5039be-48e3-4303-899e-067b4fa4b904",
+         "doc_id":"bf5039be-48e3-4303-899e-067b4fa4b904",
+         "ref_doc_id":"bf5039be-48e3-4303-899e-067b4fa4b904"
+      },

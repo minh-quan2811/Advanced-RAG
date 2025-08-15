@@ -13,3 +13,6 @@ jaconv
 matplotlib
 qdrant_client
 llama-index-vector-stores-qdrant
+langchain-experimental
+uvicorn
+fastapi
