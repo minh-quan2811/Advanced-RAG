@@ -16,10 +16,10 @@ class MarketingDocs:
         self.chunker = DocumentChunker()
 
         # File paths
-        self.docx_1_path = r'client data\JCAI３０１ＭＫ.docx'
-        self.docx_2_path = r'client data\ＪＣＡＩ３０２ＭＫ構造.docx'
-        self.docx_3_path = r'client data\ＪＣＡＩ２０２デシル顧客.docx'
-        self.docx_4_path = r'client data\ＪＣＡＩ２０４CRM.doc'
+        self.docx_1_path = r'C:\Users\Admin\Desktop\Advanced-RAG\client data\JCAI３０１ＭＫ.docx'
+        self.docx_2_path = r'C:\Users\Admin\Desktop\Advanced-RAG\client data\ＪＣＡＩ３０２ＭＫ構造.docx'
+        self.docx_3_path = r'C:\Users\Admin\Desktop\Advanced-RAG\client data\ＪＣＡＩ２０２デシル顧客.docx'
+        self.docx_4_path = r'C:\Users\Admin\Desktop\Advanced-RAG\client data\ＪＣＡＩ２０４CRM.doc'
 
         # Metadata definitions
         self.docx_1_metadata = {

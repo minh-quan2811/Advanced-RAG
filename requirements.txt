@@ -16,3 +16,6 @@ llama-index-vector-stores-qdrant
 langchain-experimental
 uvicorn
 fastapi
+langgraph
+langchain
+langchain-google-genai

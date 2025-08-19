@@ -16,19 +16,24 @@ from llama_index.core import (
     SimpleDirectoryReader, 
     load_index_from_storage,
 )
+from llama_index.core.program import LLMTextCompletionProgram
+from llama_index.core.output_parsers import PydanticOutputParser
+from pydantic import BaseModel, Field
+from typing import List
 from llama_index.core import PromptTemplate
 from llama_index.core.storage.docstore import SimpleDocumentStore
 from llama_index.core.node_parser import HierarchicalNodeParser, get_leaf_nodes, get_root_nodes
 from llama_index.core.response_synthesizers import ResponseMode
-from llama_index.core.retrievers import AutoMergingRetriever
 from llama_index.core.query_engine import RetrieverQueryEngine
-from llama_index.core.postprocessor import SimilarityPostprocessor
+from llama_index.postprocessor.cohere_rerank import CohereRerank
 from llama_index.core.callbacks import LlamaDebugHandler, CallbackManager
 from llama_index.llms.google_genai import GoogleGenAI
 from llama_index.embeddings.bedrock import BedrockEmbedding
 from llama_index.vector_stores.qdrant import QdrantVectorStore
-from llama_index.core.retrievers import VectorIndexAutoRetriever
-from llama_index.core.vector_stores import MetadataInfo, VectorStoreInfo
+from llama_index.core.retrievers import AutoMergingRetriever
+from llama_index.core.vector_stores import ExactMatchFilter, MetadataFilters
+from qdrant_client.http.models import Distance, VectorParams, PointStruct, UpdateStatus, PayloadSchemaType
+from llama_index.core.schema import QueryBundle
 
 from caller import MarketingDocs
 
@@ -42,9 +47,81 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+class QueryFilters(BaseModel):
+    """Data model for query filters."""
+    categories: List[str] = Field(description="List of categories to filter on.")
+    keywords: List[str] = Field(description="List of keywords to filter on.")
+
+def get_valid_filters_from_db():
+    # This would query to PostgreSQL database
+    # SELECT DISTINCT "Category" FROM ...; SELECT DISTINCT "Keywords" FROM ...;
+    return {
+        "categories": [
+            "Customer Value Analysis",
+            "Customer Segmentation",
+            "Loyalty & Retention",
+            "Branding & Positioning",
+            "Retail Marketing",
+            "Promotional Tactics",
+            "Performance Measurement",
+            "Case Study"
+        ],
+        "keywords": [
+            "Customer Lifetime Value (CLV)",
+            "Churn Rate Analysis",
+            "Retention Rate",
+            "Customer Investment Management (CIM)",
+            "Marketing ROI",
+            "Cross-sell & Up-sell",
+            "Decile Analysis",
+            "Customer Profiling",
+            "Targeted Promotion",
+            "Sales Forecasting",
+            "High-Value Customer Identification",
+            "Marketing Framework (Big Picture)",
+            "STP (Segmentation, Targeting, Positioning)",
+            "Customer-centric Service",
+            "Brand Storytelling",
+            "Moment of Truth (真実の瞬間)",
+            "Marketing Mix (4Ps)",
+            "Relationship Marketing",
+            "Lifestyle Segmentation",
+            "Demand Creation (需要創造)",
+            "Marketing Myopia (マーケティング近視眼)"
+        ]
+        }
+
+
+def generate_filters_for_query(query_str: str, llm: any) -> QueryFilters:
+    """Uses an LLM to extract relevant categories and keywords from a user query."""
+    logger.debug(f"Generating filters for query: {query_str}")
+    valid_filters = get_valid_filters_from_db()
+    
+    prompt = PromptTemplate(
+        "You're an expert at determine keywords and category for filtering metadata"
+        "Your task is to base on the user's query, identify relevant filters from the available options.\n"
+        "Respond ONLY with a JSON object. If no filters are relevant, return empty lists.\n\n"
+        "Available Categories: {categories}\n"
+        "Available Keywords: {keywords}\n\n"
+        "User Query: \"{query_str}\""
+    )
+    
+    program = LLMTextCompletionProgram.from_defaults(
+        output_parser=PydanticOutputParser(output_cls=QueryFilters),
+        prompt=prompt.partial_format(
+            categories=valid_filters['categories'],
+            keywords=valid_filters['keywords']
+        ),
+        llm=llm,
+    )
+    
+    filter_object = program(query_str=query_str)
+    logger.info(f"LLM generated filters: {filter_object.dict()}")
+    return filter_object
+
 class NodeStorageHandler:
     def __init__(self, google_api_key: str = None, 
-                 qdrant_url: str = None, qdrant_api_key: str = None, collection_name: str = "sailing"):
+                 qdrant_url: str = None, qdrant_api_key: str = None, collection_name: str = "sailing_test"):
         """
         Handler để storing nodes đã được xử lý sẵn
 
@@ -109,6 +186,32 @@ class NodeStorageHandler:
             # Local Qdrant
             client = qdrant_client.QdrantClient(path="./qdrant_storage")
             logger.info("Đã khởi tạo Qdrant local")
+
+        try:
+            collection_info = client.get_collection(collection_name=self.collection_name)
+            
+            # Check for 'Keywords' index
+            if "Keywords" not in collection_info.payload_schema:
+                logger.info(f"Creating payload index for 'Keywords' in collection '{self.collection_name}'...")
+                client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name="Keywords",
+                    field_schema=PayloadSchemaType.KEYWORD
+                )
+                logger.info("Index for 'Keywords' created successfully.")
+            
+            # Check for 'Category' index
+            if "Category" not in collection_info.payload_schema:
+                logger.info(f"Creating payload index for 'Category' in collection '{self.collection_name}'...")
+                client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name="Category",
+                    field_schema=PayloadSchemaType.KEYWORD
+                )
+                logger.info("Index for 'Category' created successfully.")
+                
+        except Exception as e:
+            logger.warning(f"Could not check/create payload indexes (collection might not exist yet): {e}")
             
         return client
 
@@ -127,12 +230,10 @@ class NodeStorageHandler:
 
     def build_automerging_index(self, nodes: List, persist_dir: str = "./storage", insert_batch_size: int = 20):
         """
-        Xây dựng hoặc cập nhật AutoMerging Index bằng cách thêm các node mới vào các store hiện có.
+        Xây dựng hoặc cập nhật AutoMerging Index và đảm bảo payload indexes tồn tại.
         """
-        # Check node
         if not nodes:
             logger.warning("Không có node nào được cung cấp để thêm vào. Bỏ qua.")
-            # Nếu index chưa được load, cố gắng load nó từ storage hiện có
             if not self.index and os.path.exists(persist_dir):
                 logger.info(f"Đang thử tải index hiện có từ {persist_dir}...")
                 vector_store = QdrantVectorStore(client=self.qdrant_client, collection_name=self.collection_name)
@@ -142,44 +243,26 @@ class NodeStorageHandler:
             return self.index
 
         logger.info(f"Chuẩn bị thêm {len(nodes)} nodes mới vào các kho lưu trữ...")
+        vector_store = QdrantVectorStore(client=self.qdrant_client, collection_name=self.collection_name)
 
-        # Thiết lập Vector Store
-        vector_store = QdrantVectorStore(
-            client=self.qdrant_client, 
-            collection_name=self.collection_name
-        )
-
-        # Tạo mới Storage Context (để quản lý docstore và index_store)
         if not self.storage_context:
             if os.path.exists(persist_dir):
-                logger.info(f"Tìm thấy storage tại {persist_dir}, đang tải...")
-                self.storage_context = StorageContext.from_defaults(
-                    persist_dir=persist_dir,
-                    vector_store=vector_store
-                )
+                self.storage_context = StorageContext.from_defaults(persist_dir=persist_dir, vector_store=vector_store)
             else:
-                logger.info("Không tìm thấy storage, đang tạo mới...")
                 self.storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-        # Tạo mới Index
         if not self.index:
             try:
-                logger.info("Đang thử tải index từ storage context...")
                 self.index = load_index_from_storage(self.storage_context)
                 logger.info("Đã tải index hiện có thành công.")
             except Exception:
-                logger.info("Không thể tải index (có thể là lần chạy đầu tiên). Sẽ tạo index mới.")
+                logger.info("Không thể tải index. Sẽ tạo index mới.")
                 self.index = None
 
-        # Thêm node mới và cập nhật Index
-        logger.info("Thêm tài liệu mới vào docstore...")
         self.storage_context.docstore.add_documents(nodes)
-        
         leaf_nodes = get_leaf_nodes(nodes)
-        logger.info(f"Chuẩn bị thêm {len(leaf_nodes)} leaf nodes vào vector store.")
         
         if self.index is None:
-            # Nếu chưa có index nào -> tạo mới hoàn toàn với các node đầu tiên
             logger.info("Tạo VectorStoreIndex mới...")
             self.index = VectorStoreIndex(
                 nodes=leaf_nodes,
@@ -188,145 +271,91 @@ class NodeStorageHandler:
                 show_progress=True
             )
         else:
-            # Nếu đã có index -> chỉ chèn các node mới vào
             logger.info("Chèn các node mới vào VectorStoreIndex hiện có...")
-            self.index.insert_nodes(
-                leaf_nodes,
-                show_progress=True
-            )
+            self.index.insert_nodes(leaf_nodes, show_progress=True)
 
-        # Lưu lại trạng thái mới của storage context
+        # This code runs AFTER the index (and the Qdrant collection) is guaranteed to exist.
+        logger.info("Đảm bảo payload indexes cho 'Keywords' và 'Category' tồn tại...")
+        try:
+            self.qdrant_client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="Keywords",
+                field_schema=PayloadSchemaType.KEYWORD
+            )
+            self.qdrant_client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="Category",
+                field_schema=PayloadSchemaType.KEYWORD
+            )
+            logger.info("Payload indexes đã được xác nhận/tạo thành công.")
+        except Exception as e:
+            # This might raise an error if an operation is already in progress, which is okay.
+            logger.warning(f"Could not create payload indexes (this might be okay if they already exist): {e}")
+
         self.storage_context.persist(persist_dir=persist_dir)
         logger.info(f"Đã lưu lại storage context tại {persist_dir}")
         
-        logger.info("Đã xây dựng/cập nhật xong AutoMerging Index.")
         return self.index
 
-    def _create_custom_auto_retriever(self, similarity_top_k: int = 30):
+
+    def create_retrieval_pipeline(self, persist_dir: str = "./storage_testing", similarity_top_k: int = 30):
         """
-        Tạo ra auto retrieve 
+        Returned query retrieval.
         """
-        logger.info("Định nghĩa VectorStoreInfo cho auto-retriever")
-        # Our metadata
-        vector_store_info = VectorStoreInfo(
-            content_info="A collection of marketing documents, analyses, and case studies focused on marketing strategy and customer value management.",
-            metadata_info=[
-                {
-                    "name": "Category",
-                    "type": "List[str]",
-                    "description": (
-                        "A list of high-level marketing domains or topics the document belongs to. "
-                        "A single document can belong to multiple categories. "
-                        "Use this filter when the user's query refers to a specific field, topic, or type of document. "
-                        "Examples include: 'Customer Value Analysis', 'Customer Segmentation', 'Loyalty & Retention', "
-                        "'Branding & Positioning' and many more"   
-                    ),
-                },
-                {
-                    "name": "Keywords",
-                    "type": "List[str]",
-                    "description": (
-                        "A list of specific marketing terms, models, or concepts discussed in the document. "
-                        "Use this filter when the user's query includes a specific technical term, acronym, or methodology. "
-                        "Examples include: 'Customer Lifetime Value (CLV)', 'Churn Rate Analysis', 'Retention Rate', "
-                        "'Customer Investment Management (CIM)', 'Marketing ROI', 'Cross-sell & Up-sell', "
-                        "'Decile Analysis' and many more"
-                    ),
-                },
-            ]
+        cohere_api_key = os.getenv("COHERE_API_KEY")
+        if not cohere_api_key:
+            raise ValueError("COHERE_API_KEY not found in environment variables.")
+        
+        cohere_rerank = CohereRerank(
+            api_key=cohere_api_key,
+            top_n=5
         )
-
-        logger.info("Mẫu prompt tùy chỉnh với các ví dụ")
-        # Redefine the default prompt
-        prompt_tmpl_str = """\
-        Your goal is to structure the user's query to match the request schema provided below.
-
-        << Structured Request Schema >>
-        When responding use a markdown code snippet with a JSON object formatted in the following schema:
-
-        {schema_str}
-
-        The query string should contain only text that is expected to match the contents of documents. Any conditions in the filter should not be mentioned in the query as well.
-        - Make sure that filters only refer to attributes that exist in the data source.
-        - Make sure that filters are only used as needed. If there are no filters that should be applied, return [] for the filter value.
-
-        << Example 1: Filtering by a single Category >>
-        User Query: "Tell me about loyalty and retention"
-        Structured Request:
-        ```json
-        {{
-            "query": "strategies for loyalty and retention",
-            "filters": [
-                {{"key": "Category", "value": "Loyalty & Retention", "operator": "=="}}
-            ]
-        }}
-        ```
-        << Example 2: Filtering by both Category and Keyword >>
-        User Query: "Show me case studies related to Marketing ROI"
-        Structured Request:
-        ```json
-        {{
-            "query": "Marketing ROI analysis",
-            "filters": [
-                {{"key": "Category", "value": "Case Study", "operator": "=="}},
-                {{"key": "Keywords", "value": "Marketing ROI", "operator": "=="}}
-            ]
-        }}
-        ```
-        User's Request
-        Data Source:
-        ```json
-        {info_str}
-
-        User Query:
-        {query_str}
-
-        Structured Request:
-        """
         
-        custom_prompt = PromptTemplate(prompt_tmpl_str)
-
-        logger.info("Khởi tạo VectorIndexAutoRetriever với custom prompt")
-        
-        base_retriever = VectorIndexAutoRetriever(
-            self.index,
-            vector_store_info=vector_store_info,
-            output_parser_prompt=custom_prompt,
-            similarity_top_k=similarity_top_k,
-            verbose=True
-        )
-        return base_retriever
-
-    def create_query_engine(self, persist_dir: str = "./storage", similarity_top_k: int = 30):
-        """
-        Tạo Query Engine với AutoMerging Retriever
-        """
-        logger.info("Tạo query engine từ stored nodes...")
-        
-        # Load từ storage nếu chưa có index
         if not self.index:
             self.build_automerging_index(persist_dir)
-        
-        # Tạo AutoRetriever
-        base_retriever = self._create_custom_auto_retriever(similarity_top_k=similarity_top_k)
 
-        # Use this if custome retriever not working
-        # base_retriever = self.index.as_retriever(similarity_top_k=similarity_top_k)
+        logger.info("Creating a dynamic query function...")
 
-        # Tạo AutoMerging Retriever
-        retriever = AutoMergingRetriever(base_retriever, 
-                                         self.storage_context,
-                                         verbose=True)
-        
-        # Tạo Query Engine
-        query_engine = RetrieverQueryEngine.from_args(
-            retriever=retriever,
-            response_mode=ResponseMode.TREE_SUMMARIZE,
-            callback_manager=CallbackManager([LlamaDebugHandler(print_trace_on_end=True)])
-        )
-        
-        logger.info("Query engine đã sẵn sàng!")
-        return query_engine
+        def dynamic_query_function(query_str: str):
+            # Generate filters dynamically from the user's query
+            filters = generate_filters_for_query(query_str, self.llm)
+            
+            # Construct metadata filters list
+            metadata_filters_list = []
+            if filters.categories:
+                metadata_filters_list.extend([ExactMatchFilter(key="Category", value=c) for c in filters.categories])
+            if filters.keywords:
+                metadata_filters_list.extend([ExactMatchFilter(key="Keywords", value=k) for k in filters.keywords])
+            
+            # Create the retriever ON-THE-FLY for this specific query
+            base_retriever = self.index.as_retriever(
+                similarity_top_k=similarity_top_k,
+                filters=MetadataFilters(filters=metadata_filters_list)
+            )
+            
+            # retriever = AutoMergingRetriever(
+            #     base_retriever, 
+            #     self.storage_context,
+            #     verbose=True
+            # )
+
+            # Perform the retrieval
+            logger.info("Retrieving initial documents...")
+            retrieved_nodes = base_retriever.retrieve(query_str)
+            logger.info(f"Retrieved {len(retrieved_nodes)} initial nodes.")
+
+            # Perform the reranking
+            logger.info("Reranking retrieved documents with Cohere...")
+            query_bundle = QueryBundle(query_str=query_str)
+            reranked_nodes = cohere_rerank.postprocess_nodes(
+                retrieved_nodes, query_bundle=query_bundle
+            )
+            logger.info(f"Reranked down to {len(reranked_nodes)} nodes.")
+
+            return reranked_nodes
+
+
+        return dynamic_query_function
 
     def setup_complete_pipeline(self, persist_dir: str = "./storage", similarity_top_k: int = 30):
         """
@@ -347,11 +376,10 @@ class NodeStorageHandler:
         self.build_automerging_index(all_nodes, persist_dir)
         
         # Tạo query engine
-        logger.info("Tạo query engine...")
-        query_engine = self.create_query_engine(persist_dir, similarity_top_k)
+        retrieve = self.create_retrieval_pipeline(persist_dir, similarity_top_k)
         
-        logger.info("omplete pipeline đã sẵn sàng!")
-        return query_engine
+        logger.info("Complete pipeline đã sẵn sàng!")
+        return retrieve
 
 def main():
     """
@@ -360,18 +388,15 @@ def main():
     try:
         print("=== KHỞI TẠO NODE STORAGE HANDLER ===")
         storage_handler = NodeStorageHandler(
-            collection_name="sailing"
+            collection_name="sailing_test" # Or "sailing_test"
         )
 
-        print("=== THIẾT LẬP COMPLETE PIPELINE ===")
-        query_engine = storage_handler.setup_complete_pipeline()
-
-        #---------------------------------------
-        retriever = storage_handler._create_custom_auto_retriever()
-        #---------------------------------------
+        # This now returns your retrieval function
+        print("=== THIẾT LẬP COMPLETE RETRIEVAL PIPELINE ===")
+        retrieval = storage_handler.setup_complete_pipeline()
 
         print("\n" + "="*50)
-        print("=== CHẾ ĐỘ INTERACTIVE QUERY ===")
+        print("=== CHẾ ĐỘ INTERACTIVE RETRIEVAL ===")
         print("Nhập câu hỏi của bạn (gõ 'quit' để thoát):")
         print("="*50)
         
@@ -379,7 +404,7 @@ def main():
             user_query = input("\nCâu hỏi: ").strip()
             
             if user_query.lower() in ['quit', 'exit', 'q', 'thoát']:
-                print("\nCảm ơn bạn đã sử dụng tui : D !!")
+                print("\nCảm ơn bạn đã sử dụng!!")
                 break
                 
             if not user_query:
@@ -387,25 +412,19 @@ def main():
                 continue
                 
             try:
-                # ----------------------
-                print("\n[INFO] Phân tích câu hỏi để tạo query và filter...")
-                print("-" * 80)
-
-                nodes = retriever.retrieve(
-                    str_or_query_bundle = user_query
-                )
+                print("\nĐang tìm kiếm và rerank...")
+                # The pipeline now returns a list of nodes
+                retrieve_nodes = retrieval(user_query)
                 
-                for node in nodes:
-                    print(node.text)
-                    print(node.metadata)
-
-                print("-" * 80)
-                # ----------------------
-
-                print("\nĐang tìm kiếm...")
-                response = query_engine.query(user_query)
-                print(f"\n✅ Trả lời:\n{response}")
-                print("-" * 80)
+                print("\n✅ Top Reranked Documents:\n")
+                if not retrieve_nodes:
+                    print("--> Không tìm thấy tài liệu nào liên quan.")
+                else:
+                    for i, node_with_score in enumerate(retrieve_nodes):
+                        print(f"--- Document {i+1}---")
+                        print(f"\nMetadata: {node_with_score.node.metadata}")
+                        print(f"\nContent: \n{node_with_score.node.get_content().strip()}")
+                        print("-" * 80)
                 
             except Exception as e:
                 print(f"Lỗi khi xử lý câu hỏi: {e}")
@@ -413,7 +432,6 @@ def main():
     except Exception as e:
         logger.error(f"Lỗi trong main: {e}", exc_info=True)
         print(f"Đã xảy ra lỗi nghiêm trọng: {e}")
-
 
 if __name__ == "__main__":
     main()
