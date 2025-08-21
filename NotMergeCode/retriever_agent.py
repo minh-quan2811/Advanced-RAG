@@ -4,11 +4,12 @@ import uuid
 import logging
 from dotenv import load_dotenv
 from typing import List, TypedDict, Annotated, Any
+import textwrap
 
 from pydantic import BaseModel, Field
 from langchain_core.messages import AnyMessage, ToolMessage, BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import Runnable, RunnableConfig, RunnableLambda
+from langchain_core.runnables import Runnable, RunnableConfig, RunnableLambda, RunnableParallel
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START
 from langgraph.graph.message import add_messages
@@ -18,7 +19,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from storage_handler import NodeStorageHandler
 from retrieval_pipeline import QueryPipeline, QueryFilters
 
-# --- Setup ---
+
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ def get_available_filters_str() -> str:
 
     return json.dumps(valid_filters)
 
-# --- Tool Definitions ---
+# Tools
 @tool
 def plan_retrieval_tool(question: str, error_feedback: str = "", plan: str = "") -> str:
     """
@@ -55,25 +56,28 @@ def plan_retrieval_tool(question: str, error_feedback: str = "", plan: str = "")
     else:
         error_context = ""
 
+    system_prompt_template = textwrap.dedent(f"""
+        You are an expert at creating structured query plans for a vector database and finding the correct filters based on the query.
+        Your task is to analyze the user's question and generate a JSON object that matches the required `SearchParameters` format.
+        The JSON object must contain:
+        1. A `search_query`: An optimized, self-contained query that captures the core semantic intent of the user's question. MUST be written in Japanese.
+        2. A nested `filters` object, which contains `categories` and `keywords`.
+
+        RULES:
+        - Only use filter values from the provided 'Available' lists.
+        - If no filters are relevant, the `categories` and `keywords` lists should be empty.
+        - Values inside 'categories' MUST come ONLY from Available Categories.
+        - Values inside 'keywords' MUST come ONLY from Available Keywords.
+        - Do NOT invent new values.
+        {error_context}
+
+        --- Available Filters ---
+        Categories: {{categories}}
+        Keywords: {{keywords}}
+        """)
+
     prompt = ChatPromptTemplate.from_messages([
-        ("system",
-         "You are an expert at creating structured query plans for a vector database.\n"
-         "Your task is to analyze the user's question and generate a JSON object that matches the required `SearchParameters` format.\n"
-         "The JSON object must contain:\n"
-         "1. A `search_query`: An optimized, self-contained query that captures the core semantic intent of the user's question.\n"
-         "2. A nested `filters` object, which contains `categories` and `keywords`.\n"
-         "\n"
-         "RULES:\n"
-         "- Only use filter values from the provided 'Available' lists.\n"
-         "- If no filters are relevant, the `categories` and `keywords` lists should be empty.\n"
-         "- Values inside 'categories' MUST come ONLY from Available Categories.\n"
-         "- Values inside 'keywords' MUST come ONLY from Available Keywords.\n"
-         "- Do NOT invent new values.\n"
-         f"{error_context}\n\n"
-         "--- Available Filters ---\n"
-         "Categories: {categories}\n"
-         "Keywords: {keywords}\n"
-        ),
+        ("system", system_prompt_template),
         ("human", "User Question: {question}")
     ])
 
@@ -84,7 +88,7 @@ def plan_retrieval_tool(question: str, error_feedback: str = "", plan: str = "")
         # Get the valid filters as separate lists
         valid_filters = json.loads(get_available_filters_str())
 
-        # Invoke the chain with all the required variables for the prompt template
+        # Invoke the chain
         search_params = chain.invoke({
             "question": question,
             "categories": valid_filters["categories"],
@@ -93,11 +97,11 @@ def plan_retrieval_tool(question: str, error_feedback: str = "", plan: str = "")
 
         # The output `search_params` will be a Pydantic object that matches SearchParameters
         plan_json = search_params.model_dump_json(indent=2)
-        logger.info(f"✅ Retrieval plan generated:\n{plan_json}")
+        logger.info(f"Retrieval plan generated:\n{plan_json}")
         return f"RETRIEVAL_PLAN_GENERATED: {plan_json}"
 
     except Exception as e:
-        logger.error(f"❌ Plan generation failed: {e}", exc_info=True)
+        logger.error(f"Plan generation failed: {e}", exc_info=True)
         return f"ERROR: Failed to generate a retrieval plan. Reason: {e}"
 
 @tool
@@ -115,10 +119,10 @@ def validate_plan_tool(plan: str) -> str:
         plan_json_str = plan.replace("RETRIEVAL_PLAN_GENERATED:", "").strip()
         plan_data = json.loads(plan_json_str)
         
-        # Pydantic will validate the structure for us
+        # Validate the structure
         validated_plan = SearchParameters(**plan_data)
         
-        # Custom validation for filter values
+        # Validation for filter values
         valid_filters = json.loads(get_available_filters_str())
         for category in validated_plan.filters.categories:
             if category not in valid_filters["categories"]:
@@ -131,10 +135,10 @@ def validate_plan_tool(plan: str) -> str:
                 logger.warning(error)
                 return error
         
-        logger.info("✅ Plan validation successful.")
+        logger.info("Plan validation successful.")
         return "VALIDATION_RESULT: VALID"
     except Exception as e:
-        logger.error(f"❌ Plan validation failed: {e}")
+        logger.error(f"Plan validation failed: {e}")
         return f"INVALID: Plan is not a valid JSON or has an incorrect structure. Reason: {e}"
 
 @tool
@@ -148,12 +152,12 @@ def execute_retrieval_tool(plan: str) -> str:
         plan_json_str = plan.replace("RETRIEVAL_PLAN_GENERATED:", "").strip()
         plan_data = json.loads(plan_json_str)
         search_params = SearchParameters(**plan_data)
-        
+
         documents = PIPELINE.retrieve(
             query_str=search_params.search_query,
             filters=search_params.filters
         )
-        
+
         if not documents:
             return "EXECUTION_SUCCESS: No documents were found matching the criteria."
         
@@ -162,14 +166,14 @@ def execute_retrieval_tool(plan: str) -> str:
             f"Document (Score: {node.score:.4f}):\n{node.get_content()}" 
             for node in documents
         ])
-        logger.info(f"✅ Retrieval executed successfully. Found {len(documents)} documents.")
+        logger.info(f"Retrieval executed successfully. Found {len(documents)} documents.")
         return f"EXECUTION_SUCCESS:\n{formatted_docs}"
     except Exception as e:
-        logger.error(f"❌ Retrieval execution failed: {e}")
+        logger.error(f"Retrieval execution failed: {e}")
         return f"EXECUTION_ERROR: {e}"
 
 
-# --- LangGraph Setup ---
+# LangGraph
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
 
@@ -178,7 +182,7 @@ class RetrievalAssistant:
     def __init__(self, runnable: Runnable):
         self.runnable = runnable
 
-    def __call__(self, state: State, config: RunnableConfig):
+    def __call__(self, state: State):
         while True:
             result = self.runnable.invoke(state)
             if not result.tool_calls and not result.content:
@@ -199,21 +203,34 @@ def handle_tool_error(state: State) -> dict:
         ]
     }
 
-# --- Main Agent Definition ---
+# Build Graph with Agent
 def create_qdrant_agent_graph() -> StateGraph:
     """Builds and returns the LangGraph for the Qdrant agent."""
 
+    assisstant_prompt = """
+        You are a helpful assistant that answers questions by retrieving information from a document database
+        Your task is to analyze the user's question and retrieve the most relevant information from the document database, 
+        then provide a clear and concise answer based strictly on the retrieved content.
+
+        IMPORTANT CONTEXT INFORMATION:
+        - All tools operate within this context.
+
+        WORKFLOW:
+        1. Use `plan_retrieval_tool` to create a search plan (query and filters) from the user's question
+        2. Use `validate_plan_tool` to check if the plan is valid.
+        3. If validation fails, use `plan_retrieval_tool` again with the error feedback to fix the plan.
+        4. Once validated, use `execute_retrieval_tool` to fetch the documents.
+        5. If execution fails, analyze the error and use `plan_retrieval_tool` to create a better plan.
+        6. After successfully retrieving documents, synthesize the information and provide a final, comprehensive answer in english to the user. 
+        Do not call any more tools at this stage.
+
+        IMPORTANT:
+        - When you retrieve documents and synthesize answer from them, you MUST show me the exact text you took it from.
+        - If the retrieved documents is unrelated to the question, do NOT try to generate answer.
+        """
+    
     retrieval_assistant_prompt = ChatPromptTemplate.from_messages([
-        ("system",
-         "You are a helpful assistant that answers questions by retrieving information from a document database.\n"
-         "Follow this workflow:\n"
-         "1. Use `plan_retrieval_tool` to create a search plan (query and filters) from the user's question.\n"
-         "2. Use `validate_plan_tool` to check if the plan is valid.\n"
-         "3. If validation fails, use `plan_retrieval_tool` again with the error feedback to fix the plan.\n"
-         "4. Once validated, use `execute_retrieval_tool` to fetch the documents.\n"
-         "5. If execution fails, analyze the error and use `plan_retrieval_tool` to create a better plan.\n"
-         "6. After successfully retrieving documents, synthesize the information and provide a final, comprehensive answer to the user. Do not call any more tools at this stage."
-        ),
+        ("system", assisstant_prompt),
         ("placeholder", "{messages}"),
     ])
 
@@ -254,7 +271,7 @@ def main():
         )
 
         storage_handler = NodeStorageHandler(collection_name="sailing_test")
-        storage_handler.build_or_load_index(persist_dir="./storage")
+        storage_handler.build_or_load_index()
 
         PIPELINE = QueryPipeline(storage_handler)
 
@@ -264,7 +281,6 @@ def main():
         print("\n" + "="*50)
         print("=== LangGraph Qdrant Tool-Using Agent ===")
         print("Ask me about your marketing documents. Type 'quit' to exit.")
-        print("Example: 'Tell me about case studies on churn rate analysis'")
         print("="*50)
 
         thread_id = str(uuid.uuid4())
@@ -278,7 +294,7 @@ def main():
                 break
             if not user_query:
                 continue
-            
+
             # Stream the agent's thought process
             events = agent_graph.stream({"messages": [("user", user_query)]}, config, stream_mode="values")
             for event in events:

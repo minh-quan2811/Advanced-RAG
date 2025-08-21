@@ -3,8 +3,6 @@ import logging
 from dotenv import load_dotenv
 from typing import List
 
-from llama_index.core.program import LLMTextCompletionProgram
-from llama_index.core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
 from llama_index.core import PromptTemplate, QueryBundle
 from llama_index.core.vector_stores import ExactMatchFilter, MetadataFilters, FilterCondition
@@ -68,7 +66,7 @@ class QueryPipeline:
     Handles all query-time operations using a pre-built NodeStorageHandler.
     """
     def __init__(self, storage_handler: NodeStorageHandler):
-        if not storage_handler.index or not storage_handler.storage_context:
+        if not storage_handler.index:
             raise ValueError("NodeStorageHandler must be built or loaded before creating a QueryPipeline.")
 
         self.storage_handler = storage_handler
@@ -88,29 +86,29 @@ class QueryPipeline:
         Performs retrieval and reranking for a given query string.
         Returns a list of the top reranked nodes.
         """
-        # Generate dynamic filters from the query
+        # Dynamic filters
         metadata_filters_list = []
         if filters.categories:
             metadata_filters_list.extend([ExactMatchFilter(key="Category", value=c) for c in filters.categories])
         if filters.keywords:
             metadata_filters_list.extend([ExactMatchFilter(key="Keywords", value=k) for k in filters.keywords])
 
-        # Create a standard retriever
+        # Retriever with filters
         retriever = self.storage_handler.index.as_retriever(
             similarity_top_k=similarity_top_k,
             filters=MetadataFilters(filters=metadata_filters_list,
                                     condition=FilterCondition.OR)
         )
 
-        # Perform initial retrieval
+        # Initial retrieval
         logger.info("Retrieving initial documents from vector store...")
         retrieved_nodes = retriever.retrieve(query_str)
         logger.info(f"Retrieved {len(retrieved_nodes)} initial nodes.")
-        
+
         if not retrieved_nodes:
             return []
 
-        # Perform reranking
+        # Reranking
         logger.info("Reranking retrieved documents with Cohere...")
         query_bundle = QueryBundle(query_str=query_str)
         reranked_nodes = self.reranker.postprocess_nodes(

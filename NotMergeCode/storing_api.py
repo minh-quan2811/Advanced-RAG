@@ -121,7 +121,7 @@ def generate_filters_for_query(query_str: str, llm: any) -> QueryFilters:
 
 class NodeStorageHandler:
     def __init__(self, google_api_key: str = None, 
-                 qdrant_url: str = None, qdrant_api_key: str = None, collection_name: str = "sailing_test"):
+                 qdrant_url: str = None, qdrant_api_key: str = None, collection_name: str = "api_testing"):
         """
         Handler để storing nodes đã được xử lý sẵn
 
@@ -228,77 +228,58 @@ class NodeStorageHandler:
         except Exception as e:
             logger.error(f"❌ Qdrant connection failed: {e}")
 
-    def build_automerging_index(self, nodes: List, persist_dir: str = "./storage", insert_batch_size: int = 20):
+    def build_automerging_index(self, nodes: List, insert_batch_size: int = 20):
         """
-        Xây dựng hoặc cập nhật AutoMerging Index và đảm bảo payload indexes tồn tại.
+        Xây dựng hoặc cập nhật AutoMerging Index chỉ bằng cách sử dụng Qdrant làm nơi lưu trữ.
         """
         if not nodes:
-            logger.warning("Không có node nào được cung cấp để thêm vào. Bỏ qua.")
-            if not self.index and os.path.exists(persist_dir):
-                logger.info(f"Đang thử tải index hiện có từ {persist_dir}...")
-                vector_store = QdrantVectorStore(client=self.qdrant_client, collection_name=self.collection_name)
-                self.storage_context = StorageContext.from_defaults(persist_dir=persist_dir, vector_store=vector_store)
-                self.index = load_index_from_storage(self.storage_context)
-                logger.info("Đã tải index thành công.")
             return self.index
+        
+        # Leaf node để chèn vào Qdrant
+        leaf_nodes = get_leaf_nodes(nodes)
 
-        logger.info(f"Chuẩn bị thêm {len(nodes)} nodes mới vào các kho lưu trữ...")
-        vector_store = QdrantVectorStore(client=self.qdrant_client, collection_name=self.collection_name)
+        # Vector store Qdrant
+        vector_store = QdrantVectorStore(
+            client=self.qdrant_client, 
+            collection_name=self.collection_name
+        )
 
-        if not self.storage_context:
-            if os.path.exists(persist_dir):
-                self.storage_context = StorageContext.from_defaults(persist_dir=persist_dir, vector_store=vector_store)
-            else:
-                self.storage_context = StorageContext.from_defaults(vector_store=vector_store)
-
+        # Tải index hiện có nếu có
         if not self.index:
             try:
-                self.index = load_index_from_storage(self.storage_context)
-                logger.info("Đã tải index hiện có thành công.")
-            except Exception:
-                logger.info("Không thể tải index. Sẽ tạo index mới.")
+                logger.debug(f"Đang thử tải index hiện có từ vector store '{self.collection_name}'...")
+                self.index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
+                logger.debug("Đã kết nối thành công với index hiện có trong Qdrant.")
+            except Exception as e:
+                logger.debug(f"Không thể tải index từ vector store (có thể là lần chạy đầu tiên). Lỗi: {e}. Sẽ tạo index mới nếu có nodes.")
                 self.index = None
 
-        self.storage_context.docstore.add_documents(nodes)
-        leaf_nodes = get_leaf_nodes(nodes)
-        
+        # Quyết định tạo mới hay cập nhật index
         if self.index is None:
-            logger.info("Tạo VectorStoreIndex mới...")
+            # Nếu chưa có index nào -> tạo mới hoàn toàn.            
+            self.storage_context = StorageContext.from_defaults(vector_store=vector_store)
+            
             self.index = VectorStoreIndex(
                 nodes=leaf_nodes,
                 storage_context=self.storage_context,
                 insert_batch_size=insert_batch_size,
                 show_progress=True
             )
+            logger.debug("Đã tạo thành công index mới.")
         else:
-            logger.info("Chèn các node mới vào VectorStoreIndex hiện có...")
-            self.index.insert_nodes(leaf_nodes, show_progress=True)
-
-        # This code runs AFTER the index (and the Qdrant collection) is guaranteed to exist.
-        logger.info("Đảm bảo payload indexes cho 'Keywords' và 'Category' tồn tại...")
-        try:
-            self.qdrant_client.create_payload_index(
-                collection_name=self.collection_name,
-                field_name="Keywords",
-                field_schema=PayloadSchemaType.KEYWORD
+            # Nếu đã có index -> chỉ chèn các node mới vào.
+            logger.debug("Chèn các node mới vào VectorStoreIndex hiện có...")
+            self.index.insert_nodes(
+                leaf_nodes,
+                show_progress=True
             )
-            self.qdrant_client.create_payload_index(
-                collection_name=self.collection_name,
-                field_name="Category",
-                field_schema=PayloadSchemaType.KEYWORD
-            )
-            logger.info("Payload indexes đã được xác nhận/tạo thành công.")
-        except Exception as e:
-            # This might raise an error if an operation is already in progress, which is okay.
-            logger.warning(f"Could not create payload indexes (this might be okay if they already exist): {e}")
-
-        self.storage_context.persist(persist_dir=persist_dir)
-        logger.info(f"Đã lưu lại storage context tại {persist_dir}")
+            logger.debug("Đã chèn thành công các node mới.")
         
+        logger.debug("Đã xây dựng/cập nhật xong AutoMerging Index. Tất cả dữ liệu đã nằm trong Qdrant.")
         return self.index
 
 
-    def create_retrieval_pipeline(self, persist_dir: str = "./storage_testing", similarity_top_k: int = 30):
+    def create_retrieval_pipeline(self, similarity_top_k: int = 30):
         """
         Returned query retrieval.
         """
@@ -310,9 +291,6 @@ class NodeStorageHandler:
             api_key=cohere_api_key,
             top_n=5
         )
-        
-        if not self.index:
-            self.build_automerging_index(persist_dir)
 
         logger.info("Creating a dynamic query function...")
 
@@ -357,7 +335,7 @@ class NodeStorageHandler:
 
         return dynamic_query_function
 
-    def setup_complete_pipeline(self, persist_dir: str = "./storage", similarity_top_k: int = 30):
+    def setup_complete_pipeline(self, similarity_top_k: int = 30):
         """
         Thiết lập pipeline hoàn chỉnh từ nodes đến query engine
         """
@@ -373,10 +351,10 @@ class NodeStorageHandler:
         
         # Build index
         logger.info("Xây dựng AutoMerging Index...")
-        self.build_automerging_index(all_nodes, persist_dir)
+        self.build_automerging_index(all_nodes)
         
         # Tạo query engine
-        retrieve = self.create_retrieval_pipeline(persist_dir, similarity_top_k)
+        retrieve = self.create_retrieval_pipeline(similarity_top_k)
         
         logger.info("Complete pipeline đã sẵn sàng!")
         return retrieve
@@ -388,7 +366,7 @@ def main():
     try:
         print("=== KHỞI TẠO NODE STORAGE HANDLER ===")
         storage_handler = NodeStorageHandler(
-            collection_name="sailing_test" # Or "sailing_test"
+            collection_name="api_testing" # Or "sailing_test"
         )
 
         # This now returns your retrieval function
