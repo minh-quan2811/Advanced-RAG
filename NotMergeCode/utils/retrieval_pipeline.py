@@ -124,7 +124,7 @@ class QueryPipeline:
 #         # Setup the storage and index
 #         print("=== INITIALIZING STORAGE HANDLER ===")
 #         storage_handler = NodeStorageHandler(collection_name="sailing_test")
-#         storage_handler.build_or_load_index(persist_dir="./storage")
+#         storage_handler.build_automerging_index(persist_dir="./storage")
 
 #         print("\n=== INITIALIZING QUERY PIPELINE ===")
 #         pipeline = QueryPipeline(storage_handler)

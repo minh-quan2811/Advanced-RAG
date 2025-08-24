@@ -147,7 +147,7 @@ def execute_retrieval_tool(plan: str) -> str:
     Executes a validated retrieval plan using the Qdrant pipeline.
     """
     logger.info("Tool called: execute_retrieval_tool")
-    
+
     try:
         plan_json_str = plan.replace("RETRIEVAL_PLAN_GENERATED:", "").strip()
         plan_data = json.loads(plan_json_str)
@@ -271,7 +271,7 @@ def main():
         )
 
         storage_handler = NodeStorageHandler(collection_name="sailing_test")
-        storage_handler.build_or_load_index()
+        storage_handler.build_automerging_index()
 
         PIPELINE = QueryPipeline(storage_handler)
 

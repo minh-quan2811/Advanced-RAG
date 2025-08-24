@@ -116,7 +116,7 @@ class DocumentChunker:
 
     def apply_metadata(self, nodes, metadata: dict):
         for node in self.get_leaf_nodes(nodes):
-            node.metadata = metadata
+            node.metadata.update(metadata)
 
         return nodes
 

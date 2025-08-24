@@ -1,0 +1,380 @@
+import os
+import logging
+from pathlib import Path
+from dotenv import load_dotenv
+from typing import List, Optional
+
+from llama_index.core import (
+    Settings,
+    VectorStoreIndex,
+    StorageContext,
+    SimpleDirectoryReader, 
+    load_index_from_storage,
+)
+from llama_index.core import PromptTemplate
+from llama_index.core.schema import BaseNode, MetadataMode
+from llama_index.core import SelectorPromptTemplate
+from llama_index.core.response_synthesizers import ResponseMode
+from llama_index.core.retrievers import AutoMergingRetriever, VectorIndexAutoRetriever
+from llama_index.core.node_parser import get_leaf_nodes
+from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.core.callbacks import LlamaDebugHandler, CallbackManager
+from llama_index.llms.google_genai import GoogleGenAI
+from llama_index.embeddings.bedrock import BedrockEmbedding
+from llama_index.vector_stores.qdrant import QdrantVectorStore
+from llama_index.core.retrievers import VectorIndexAutoRetriever
+from llama_index.core.vector_stores import VectorStoreInfo
+from llama_index.storage.docstore.postgres import PostgresDocumentStore
+from llama_index.storage.index_store.postgres import PostgresIndexStore
+import psycopg2
+
+from caller import MarketingDocs
+
+import qdrant_client
+
+# Load environment variables
+load_dotenv()
+
+# Setting logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class NodeStorageHandler:
+    def __init__(self, qdrant_url: str = None, qdrant_api_key: str = None, 
+                 collection_name: str = "storage_testing",
+                 postgres_config: dict = None):
+        """
+        Handler for storing pre-processed nodes
+        Args:
+            qdrant_url: Qdrant server URL
+            qdrant_api_key: Qdrant API key for cloud
+            collection_name: Name of the collection in Qdrant
+            postgres_config: PostgreSQL configuration dictionary (keys: host, port, user, password, database)
+        """
+        self.collection_name = collection_name
+        self.postgres_config = postgres_config or {
+            "host": os.getenv("POSTGRES_HOST"),
+            "port": os.getenv("POSTGRES_PORT"),
+            "user": os.getenv("POSTGRES_USER"),
+            "password": os.getenv("POSTGRES_PASSWORD"),
+            "database": os.getenv("POSTGRES_DB"),
+        }
+
+        # Initialize LLM and Embedding model
+        self.llm = GoogleGenAI(
+            model_name="gemini-2.0-flash",
+            temperature=0.1,
+        )
+        self.embed_model = BedrockEmbedding(
+            model_name="amazon.titan-embed-text-v2:0",
+            region_name='us-west-2',
+        )
+
+        Settings.llm = self.llm
+        Settings.embed_model = self.embed_model
+
+        # Setting Qdrant client
+        qdrant_url = qdrant_url or os.getenv("QDRANT_URL")
+        qdrant_api_key = qdrant_api_key or os.getenv("QDRANT_API_KEY")
+        self.qdrant_client = self._setup_qdrant_client(qdrant_url, qdrant_api_key)
+        
+        # Check connections
+        self._check_connections()
+        
+        self.index = None
+        self.auto_merging_retriever = None
+        self.storage_context = None
+
+    def _setup_qdrant_client(self, qdrant_url: Optional[str] = None, qdrant_api_key: Optional[str] = None):
+        """
+        Setup Qdrant client
+        """
+        logger.debug("Setting up Qdrant client...")
+        
+        if qdrant_url and qdrant_api_key:
+            client = qdrant_client.QdrantClient(
+                url=qdrant_url,
+                api_key=qdrant_api_key,
+                timeout=60
+            )
+            logger.debug("Connected to Qdrant Cloud")
+        else:
+            logger.warning("Can't connect to Qdrant Cloud")
+            
+        return client
+
+    def _check_connections(self):
+        """
+        Check connections to services
+        """
+        logger.debug("Checking connections...")
+    
+        # Check Qdrant
+        try:
+            collections = self.qdrant_client.get_collections()
+            logger.debug(f"Qdrant connection OK - {len(collections.collections)} collections")
+        except Exception as e:
+            logger.error(f"Qdrant connection failed: {e}")
+
+        # Check PostgreSQL
+        try:
+            conn = psycopg2.connect(**self.postgres_config)
+            conn.close()
+            logger.debug("PostgreSQL connection OK")
+        except Exception as e:
+            logger.error(f"PostgreSQL connection failed: {e}")
+
+    def setup_stores(self):
+        """
+        Sets up Qdrant Vector Store, PostgreSQL DocStore, and IndexStore.
+        """
+        # Setup Qdrant Vector Store
+        vector_store = QdrantVectorStore(
+            client=self.qdrant_client,
+            collection_name=self.collection_name
+        )
+
+        # Setup PostgreSQL DocStore and IndexStore
+        docstore = PostgresDocumentStore.from_params(
+            host=self.postgres_config["host"],
+            port=self.postgres_config["port"],
+            database=self.postgres_config["database"],
+            user=self.postgres_config["user"],
+            password=self.postgres_config["password"]
+        )
+
+        index_store = PostgresIndexStore.from_params(
+            host=self.postgres_config["host"],
+            port=self.postgres_config["port"],
+            database=self.postgres_config["database"],
+            user=self.postgres_config["user"],
+            password=self.postgres_config["password"]
+        )
+
+        return vector_store, docstore, index_store
+
+    def _prepare_metadata_nodes(self, nodes: List[BaseNode]) -> List[BaseNode]:
+        """
+        Applies custom templates and metadata exclusions to nodes before indexing.
+        This controls exactly what the LLM and Embedding models will process.
+        """
+        keys_to_excluded = ["file_path"]
+
+        for i, node in enumerate(nodes):
+            node.text_template = "Metadata:\n{metadata_str}\n-----\nContent:\n{content}"
+            node.metadata_seperator = "\n"
+
+            exclusion_lists = [
+                node.excluded_llm_metadata_keys,
+                node.excluded_embed_metadata_keys
+            ]
+
+            # Exclude metadata being seen by the LLM and EMBED
+            for lst in exclusion_lists:
+                for key in keys_to_excluded:
+                    if key not in lst:
+                        lst.append(key)
+
+        return nodes
+
+    def build_automerging_index(self, nodes: Optional[List] = None, insert_batch_size: int = 20):
+        """
+        Adding or Load AutoMerging Index by adding new nodes to PostgreSQL and Qdrant.
+        """
+        # Create Storage Context
+        vector_store, docstore, index_store = self.setup_stores()
+
+        self.storage_context = StorageContext.from_defaults(
+            docstore=docstore,
+            index_store=index_store,
+            vector_store=vector_store
+        )
+
+        if nodes:
+            logger.debug(f"Adding {len(nodes)} nodes to the stores.")
+            docstore.add_documents(nodes)
+
+            prepared_nodes = get_leaf_nodes(nodes)
+            leaf_nodes = self._prepare_metadata_nodes(prepared_nodes)
+
+            self.index = VectorStoreIndex(
+                nodes=leaf_nodes,
+                storage_context=self.storage_context,
+                insert_batch_size=insert_batch_size,
+                show_progress=True
+            )
+        else:
+            logger.info("Loading existing index from storage.")
+            self.index = load_index_from_storage(self.storage_context)
+
+        logger.info("Finished building/updating AutoMerging Index.")
+        return self.index
+
+
+#------------------------------------------------   
+    def _create_custom_auto_retriever(self, similarity_top_k: int = 30):
+        """
+        Create an auto retriever
+        """
+        logger.debug("Defining VectorStoreInfo for auto-retriever")
+        # Our metadata
+        vector_store_info = VectorStoreInfo(
+            content_info="A collection of marketing documents, analyses, and case studies focused on marketing strategy and customer value management.",
+            metadata_info=[
+                {
+                    "name": "Category",
+                    "type": "List[str]",
+                    "description": (
+                        "A list of high-level marketing domains or topics the document belongs to. "
+                        "A single document can belong to multiple categories. "
+                        "Use this filter when the user's query refers to a specific field, topic, or type of document. "
+                        "Examples include: 'Customer Value Analysis', 'Customer Segmentation', 'Loyalty & Retention', "
+                        "'Branding & Positioning' and many more"   
+                    ),
+                },
+                {
+                    "name": "Keywords",
+                    "type": "List[str]",
+                    "description": (
+                        "A list of specific marketing terms, models, or concepts discussed in the document. "
+                        "Use this filter when the user's query includes a specific technical term, acronym, or methodology. "
+                        "Examples include: 'Customer Lifetime Value (CLV)', 'Churn Rate Analysis', 'Retention Rate', "
+                        "'Customer Investment Management (CIM)', 'Marketing ROI', 'Cross-sell & Up-sell', "
+                        "'Decile Analysis' and many more"
+                    ),
+                },
+            ]
+        )
+
+
+        # Redefine the default prompt
+        prompt_tmpl_str = """
+        Your goal is to structure the user's query to match the request schema provided below.
+
+        << Structured Request Schema >>
+        When responding use a markdown code snippet with a JSON object formatted in the following schema:
+
+        {schema_str}
+
+        The query string should contain only text that is expected to match the contents of documents. Any conditions in the filter should not be mentioned in the query as well.
+        - Make sure that filters only refer to attributes that exist in the data source.
+        - Make sure that filters are only used as needed. If there are no filters that should be applied, return [] for the filter value.
+
+        << Example 1: Filtering by a single Category >>
+        User Query: "Tell me about loyalty and retention"
+        Structured Request:
+        ```json
+        {{
+            "query": "strategies for loyalty and retention",
+            "filters": [
+                {{"key": "Category", "value": "Loyalty & Retention", "operator": "=="}}
+            ]
+        }}
+        ```
+        << Example 2: Filtering by both Category and Keyword >>
+        User Query: "Show me case studies related to Marketing ROI"
+        Structured Request:
+        ```json
+        {{
+            "query": "Marketing ROI analysis",
+            "filters": [
+                {{"key": "Category", "value": "Case Study", "operator": "=="}},
+                {{"key": "Keywords", "value": "Marketing ROI", "operator": "=="}}
+            ]
+        }}
+        ```
+        User's Request
+        Data Source:
+        ```json
+        {info_str}
+
+        User Query:
+        {query_str}
+
+        Structured Request:
+        """
+        
+        custom_prompt = PromptTemplate(prompt_tmpl_str)
+
+        logger.debug("Initializing VectorIndexAutoRetriever with custom prompt")
+        
+        base_retriever = VectorIndexAutoRetriever(
+            self.index,
+            vector_store_info=vector_store_info,
+            output_parser_prompt=custom_prompt,
+            similarity_top_k=similarity_top_k,
+            verbose=True
+        )
+        return base_retriever
+
+    def create_query_engine(self, similarity_top_k: int = 30):
+        """
+        Create Query Engine with AutoMerging Retriever
+        """
+        logger.debug("Creating query engine from stored nodes...")
+        
+        # Load from storage if no index exists
+        if not self.index:
+            self.build_automerging_index()
+        
+        # Create AutoRetriever
+        base_retriever = self._create_custom_auto_retriever(similarity_top_k=similarity_top_k)
+
+        # Use this if custome retriever not working
+        # base_retriever = self.index.as_retriever(similarity_top_k=similarity_top_k)
+
+        # Create AutoMerging Retriever
+        retriever = AutoMergingRetriever(base_retriever, 
+                                         self.storage_context,
+                                         verbose=True)
+        
+        # Create Query Engine
+        query_engine = RetrieverQueryEngine.from_args(
+            retriever=retriever,
+            response_mode=ResponseMode.TREE_SUMMARIZE,
+            callback_manager=CallbackManager([LlamaDebugHandler(print_trace_on_end=True)])
+        )
+        
+        logger.debug("Query engine is ready!")
+        return query_engine
+
+def main():
+    """
+    Main function to test the NodeStorageHandler class.
+    """
+    # Initialize NodeStorageHandler
+    handler = NodeStorageHandler()
+
+    # Test connections
+    print("Testing connections...")
+    handler._check_connections()
+
+    # Fetch nodes (mocked or from MarketingDocs)
+    print("Fetching nodes...")
+    md = MarketingDocs()
+    nodes = md.get_nodes()
+
+    # if not nodes:
+    #     print("No nodes fetched. Ensure MarketingDocs is properly configured.")
+    #     return
+
+    print(f"Fetched {len(nodes)} nodes.")
+
+    # Build the index
+    print("Building the index...")
+    handler.build_automerging_index(nodes)
+
+    # Create the query engine
+    # print("Creating the query engine...")
+    # query_engine = handler.create_query_engine(similarity_top_k=5)
+
+    # # Test a query
+    # print("Testing the query engine...")
+    # query = "What are the best strategies for customer retention?"
+    # response = query_engine.query(query)
+
+    # print("Query Response:")
+    # print(response)
+
+if __name__ == "__main__":
+    main()
