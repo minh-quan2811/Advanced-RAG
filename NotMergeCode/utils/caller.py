@@ -19,7 +19,7 @@ class MarketingDocs:
         self.docx_1_path = r'C:\Users\Admin\Desktop\Advanced-RAG\client data\JCAI３０１ＭＫ.docx'
         self.docx_2_path = r'C:\Users\Admin\Desktop\Advanced-RAG\client data\ＪＣＡＩ３０２ＭＫ構造.docx'
         self.docx_3_path = r'C:\Users\Admin\Desktop\Advanced-RAG\client data\ＪＣＡＩ２０２デシル顧客.docx'
-        self.docx_4_path = r'C:\Users\Admin\Desktop\Advanced-RAG\client data\example.docx'
+        self.docx_4_path = r'C:\Users\Admin\Desktop\Advanced-RAG\client data\ＪＣＡＩ２０４CRM.docx'
 
         # Metadata definitions
         self.docx_1_metadata = {
@@ -96,14 +96,14 @@ class MarketingDocs:
     def get_nodes(self):
         docx_1_nodes = self.chunker.chunk_from_file(self.docx_1_path, self.docx_1_metadata)
         docx_2_nodes = self.chunker.chunk_from_file(self.docx_2_path, self.docx_2_metadata)
-        docx_3_nodes = self.chunker.chunk_from_file(self.docx_3_path, self.docx_3_metadata)
+        # docx_3_nodes = self.chunker.chunk_from_file(self.docx_3_path, self.docx_3_metadata)
         # docx_4_nodes = self.chunker.chunk_from_file(self.docx_4_path, self.docx_4_metadata)
 
         all_nodes = []
 
         all_nodes.extend(docx_1_nodes)
         all_nodes.extend(docx_2_nodes)
-        all_nodes.extend(docx_3_nodes)
+        # all_nodes.extend(docx_3_nodes)
         # all_nodes.extend(docx_4_nodes)
 
         return all_nodes

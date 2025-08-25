@@ -204,7 +204,7 @@ def handle_tool_error(state: State) -> dict:
     }
 
 # Build Graph with Agent
-def create_qdrant_agent_graph() -> StateGraph:
+def global_retrieve_agent_graph() -> StateGraph:
     """Builds and returns the LangGraph for the Qdrant agent."""
 
     assisstant_prompt = """
@@ -270,13 +270,13 @@ def main():
             max_retries=2,
         )
 
-        storage_handler = NodeStorageHandler(collection_name="sailing_test")
+        storage_handler = NodeStorageHandler()
         storage_handler.build_automerging_index()
 
         PIPELINE = QueryPipeline(storage_handler)
 
         # Create the LangGraph agent
-        agent_graph = create_qdrant_agent_graph()
+        agent_graph = global_retrieve_agent_graph()
 
         print("\n" + "="*50)
         print("=== LangGraph Qdrant Tool-Using Agent ===")

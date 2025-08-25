@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 class NodeStorageHandler:
     def __init__(self, qdrant_url: str = None, qdrant_api_key: str = None, 
-                 collection_name: str = "storage_testing",
+                 collection_name: str = "store_testing", index_id: str = "marketing_docs_index",
                  postgres_config: dict = None):
         """
         Handler for storing pre-processed nodes
@@ -48,6 +48,7 @@ class NodeStorageHandler:
             postgres_config: PostgreSQL configuration dictionary (keys: host, port, user, password, database)
         """
         self.collection_name = collection_name
+        self.index_id = index_id
         self.postgres_config = postgres_config or {
             "host": os.getenv("POSTGRES_HOST"),
             "port": os.getenv("POSTGRES_PORT"),
@@ -175,7 +176,7 @@ class NodeStorageHandler:
 
     def build_automerging_index(self, nodes: Optional[List] = None, insert_batch_size: int = 20):
         """
-        Adding or Load AutoMerging Index by adding new nodes to PostgreSQL and Qdrant.
+        Adding nodes to PostgreSQL and Qdrant or Load AutoMerging Index if no nodes provided.
         """
         # Create Storage Context
         vector_store, docstore, index_store = self.setup_stores()
@@ -199,9 +200,11 @@ class NodeStorageHandler:
                 insert_batch_size=insert_batch_size,
                 show_progress=True
             )
+            self.index.set_index_id(self.index_id)
+            self._ensure_payload_indexes()
         else:
             logger.info("Loading existing index from storage.")
-            self.index = load_index_from_storage(self.storage_context)
+            self.index = load_index_from_storage(self.storage_context, index_id=self.index_id)
 
         logger.info("Finished building/updating AutoMerging Index.")
         return self.index
